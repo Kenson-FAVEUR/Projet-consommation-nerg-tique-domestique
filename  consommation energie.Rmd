@@ -1,0 +1,471 @@
+---
+title: "Projet consommation électrique domestique"
+author: "Kenson FAVEUR"
+date: "2025-03-24"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+# Introduction
+Ce projet a pour objectif d’analyser une série temporelle représentant la consommation électrique d’un foyer. Les données proviennent de relevés effectués toutes les minutes sur une période de six mois, allant du 1er janvier au 30 juin 2007. La variable principale étudiée est Global_active_power, qui mesure la puissance active consommée (en kilowatts).
+
+L’étude suit les étapes classiques d’une analyse de données :
+
+Exploration descriptive : compréhension des variables et de leur distribution.
+
+Identification des composantes temporelles : présence éventuelle de tendance, saisonnalité ou cycle.
+
+Choix d’un modèle de prédiction adapté à la structure des données.
+
+Mise en place du modèle (ici, une régression linéaire multiple) pour expliquer la consommation active à partir de variables explicatives disponibles.
+
+Évaluation du modèle : interprétation des coefficients, diagnostic des résidus, et mesure de la performance prédictive.
+
+Pistes d’amélioration : limitations identifiées et suggestions pour des modèles plus complexes.
+
+Ce rapport fournit une analyse complète de la consommation électrique domestique à partir de données mesurées, avec pour but de comprendre les facteurs influençant la consommation et de prédire son évolution à court terme.
+
+
+
+# Charger les packages nécessaires
+```{r message=TRUE, warning=TRUE}
+# Charger les packages
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(tseries)
+library(imputeTS)  # Pour traiter les valeurs manquantes
+```
+
+
+# Importer la base de données
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = TRUE, message = TRUE)
+# Définir mon repertoire de travail
+setwd("C:/Users/PC/OneDrive/Bureau/Fouille des données")
+
+# Importer la base de données
+data <- read.csv("household_power_consumption.csv", sep=",", header=TRUE)
+str(data)
+```
+
+
+# Prétraitements des données
+```{r message=TRUE, warning=TRUE}
+# Conversion des colonnes numériques
+cols_to_numeric <- c("Global_active_power", "Global_reactive_power", "Voltage", 
+                     "Global_intensity", "Sub_metering_1", "Sub_metering_2")
+data[cols_to_numeric] <- lapply(data[cols_to_numeric], function(x) as.numeric(as.character(x)))
+
+```
+
+
+# Correction de la colonne Date
+```{r message=TRUE, warning=TRUE}
+# Convertir la colonne Date correctement
+data$Date <- dmy(data$Date)  # Jour/Mois/Année (ex: 01/01/07 → 2007-01-01)
+head(data$Date)
+```
+# Vérification du format Time et faire la fusion
+```{r message=TRUE, warning=TRUE}
+# Vérification du format Time
+head(data$Time)
+
+# Fusionner Date et Time pour obtenir DateTime
+data$DateTime <- as.POSIXct(paste(data$Date, data$Time), format="%Y-%m-%d %H:%M:%S")
+
+# Vérifier s'il y a des erreurs
+sum(is.na(data$DateTime))
+
+# Vérifier l'affichage
+head(data$DateTime)
+```
+# Traitement des valeurs manquantes de la colonne de DateTime
+```{r message=TRUE, warning=TRUE}
+data[is.na(data$DateTime),]
+
+# Vérifier s'il y a des valeurs manquantes dans Date et Time
+sum(is.na(data$Date))
+sum(is.na(data$Time))
+
+# Vérifiez les types Date et Time
+str(data$Date)
+str(data$Time)
+```
+# Convertir la colonne Date et Time en character
+```{r message=TRUE, warning=TRUE}
+# Convertissez la colonne Date et Time en character
+data$Date <- as.character(data$Date)
+data$Time <- as.character(data$Time)
+str(data$Date)
+str(data$Time)
+```
+# Fusionner à nouveau la colonne de Date et Time
+```{r message=TRUE, warning=TRUE}
+# Fusionner Date et Time pour obtenir DateTime
+data$DateTime <- as.POSIXct(paste(data$Date, data$Time), format="%Y-%m-%d %H:%M:%S")
+
+# Vérifier s'il y a des erreurs
+sum(is.na(data$DateTime))
+
+# Vérifier l'affichage
+head(data$DateTime)
+
+# Vérifier les valeurs manquantes dans ma base de données
+sum(is.na(data))
+```
+
+# Forcer la conversion du date time pour traiter les valeurs manquantes
+```{r message=TRUE, warning=TRUE}
+# Vérifier la structure du Date et Time
+head(data$Date)
+head(data$Time)
+
+# Correction de la conversion DateTime
+data <- data %>%
+  mutate(DateTime = parse_date_time(paste(Date, Time), orders=c("d/m/Y H:M:S", "Y-m-d H:M:S")))
+
+# Vérifier s'il ya des valeurs manquantes dans la colonne du DateTime
+sum(is.na(data$DateTime))
+```
+
+
+# Vérification le nombre des valeurs manquantes dans ma base de données
+```{r message=TRUE, warning=TRUE}
+# Vérifier les valeurs manquantes dans la base de données
+sum(is.na(data))
+```
+
+# Correction des valeurs manquantes dans ma base de données par interpollation
+```{r message=TRUE, warning=TRUE}
+# Traiter les valeurs manquantes par interpollation
+data <- data %>%
+  mutate(
+    Global_active_power = zoo::na.approx(Global_active_power, na.rm=FALSE),
+    Voltage = zoo::na.approx(Voltage, na.rm=FALSE),
+    Global_intensity = zoo::na.approx(Global_intensity, na.rm=FALSE),
+    Sub_metering_1 = zoo::na.approx(Sub_metering_1, na.rm=FALSE),
+    Sub_metering_2 = zoo::na.approx(Sub_metering_2, na.rm=FALSE),
+    Sub_metering_3 = zoo::na.approx(Sub_metering_3, na.rm=FALSE),
+  Global_reactive_power = zoo::na.approx(Global_reactive_power, na.rm = FALSE)
+  )
+# Vérifier s'il ya des valeurs manquantes dans ma base
+sum(is.na(data))
+
+```
+
+# Statistiques descriptives
+```{r message=TRUE, warning=TRUE}
+# Resumé statistique de la base de données
+summary(data)
+```
+# Interprétaion des variables
+
+index : Numéro d'observation allant de 0 à 260639, confirmant que la base contient 260 640 lignes, soit autant de relevés de données.
+
+Date & Time : Variables textuelles représentant la date et l'heure de chaque observation. Elles sont utilisées pour construire la variable DateTime.
+
+DateTime : Variable combinant Date et Time en format date-heure. Elle indique que les données couvrent une période de six mois, du 1er janvier 2007 au 30 juin 2007, avec une fréquence d'enregistrement régulière.
+
+## Consommation électrique
+Global_active_power (kW)
+Cette variable mesure la puissance active consommée par l'ensemble du foyer. Elle varie entre 0.082 et 10.67 kW.
+
+Moyenne : 1.15 kW ; Médiane : 0.53 kW.
+La moyenne étant nettement plus élevée que la médiane, cela indique une distribution asymétrique à droite, suggérant des pics de consommation occasionnels. La majorité du temps, la consommation reste faible à modérée.
+
+## Global_reactive_power (kW)
+Représente la puissance réactive, c’est-à-dire l’énergie consommée par les champs magnétiques (moteurs, transformateurs, etc.).
+
+Moyenne : 0.124 kW, max : 1.148 kW.
+→ Cette consommation est faible dans l’ensemble, ce qui est attendu dans un contexte résidentiel.
+
+## Global_intensity (A)
+Mesure de l’intensité du courant. Elle suit une distribution similaire à celle de la puissance active.
+
+Moyenne : 4.93 A, médiane : 2.4 A, max : 46.4 A.
+→ Confirme une intensité généralement faible, avec des pics ponctuels qui peuvent correspondre à l’utilisation de plusieurs appareils énergivores simultanément.
+
+## Tension
+Voltage (V)
+Tension mesurée à chaque instant dans le réseau domestique.
+
+Moyenne : 239.2 V, écart modéré entre min (223.5 V) et max (250.9 V).
+→ Cela montre une tension relativement stable, ce qui est normal dans une installation bien régulée. Les petites variations sont habituelles dans les réseaux électriques.
+
+## Sous-comptages (Sub_metering)
+Les trois variables suivantes mesurent la consommation spécifique de certains groupes d'appareils (en wattheures) :
+
+Sub_metering_1 (Cuisine : four, micro-ondes, etc.)
+
+Moyenne : 1.31 Wh, médiane : 0 Wh, max : 78 Wh.
+→ L’appareil est utilisé de manière très ponctuelle, souvent éteint.
+
+Sub_metering_2 (Lave-linge, lave-vaisselle, etc.)
+
+Moyenne : 1.65 Wh, médiane : 0 Wh, max : 78 Wh.
+→ Même observation que précédemment : appareils peu utilisés ou avec des cycles courts, apparaissant sous forme de pics.
+
+Sub_metering_3 (Chauffe-eau, climatisation, etc.)
+
+Moyenne : 5.75 Wh, médiane : 0 Wh, max : 20 Wh.
+→ Cette zone est plus régulièrement sollicitée. Bien que la médiane soit également nulle, la moyenne plus élevée indique un usage plus fréquent ou plus énergivore.
+
+
+
+# Resumé statistiques de la variable Global_active_power.
+
+```{r message=TRUE, warning=TRUE}
+# Resumé statistiques
+summary(data$Global_active_power)
+
+# Représentation graphique du variable à expliquer 
+hist(data$Global_active_power, breaks = 50, col = "skyblue", main = "Distribution de la consommation", xlab = "kW")
+boxplot(data$Global_active_power, main = "Outliers - Consommation électrique")
+
+```
+
+
+## Interprétation
+
+On observe que la moyenne (1.154 kW) est nettement supérieure à la médiane (0.534 kW), ce qui indique une distribution asymétrique à droite. Cela signifie que dans la majorité des cas, la consommation est relativement faible, mais il existe des valeurs extrêmes plus élevées correspondant à des pics de consommation. La présence de ces pics peut être liée à l'utilisation simultanée de plusieurs appareils électroménagers ou à des périodes spécifiques de forte activité dans le foyer.
+
+## Interprétation de l'histogramme
+La distribution est fortement asymétrique à droite (skewed right), avec une concentration très marquée des données autour des valeurs faibles (proches de 0).
+
+La plupart des observations ont une consommation inférieure à 2 kW, ce qui confirme une consommation généralement modérée dans le foyer.
+
+Au-delà de 2 kW, les fréquences chutent rapidement, mais on note tout de même la présence de valeurs élevées (jusqu’à plus de 10 kW), bien que peu fréquentes.
+
+Cette asymétrie est cohérente avec les résultats du résumé statistique et du boxplot, qui montrent une médiane inférieure à la moyenne et la présence de nombreux outliers positifs.
+
+## Interprétation du boxplot
+La majorité des valeurs se situent entre environ 0.1 et 3.5 kW, ce qui correspond à la plage centrale de consommation.
+
+Le boîte grise représente l’intervalle interquartile (entre le 1er et le 3e quartile), soit la moitié centrale des données.
+
+La ligne noire au centre de la boîte indique la médiane (~0.53 kW).
+
+Les valeurs au-dessus des "moustaches" (au-delà de ~3.5 kW) sont considérées comme des valeurs aberrantes (outliers) selon la définition classique (valeurs > Q3 + 1.5 × IQR).
+
+On note une grande concentration de points au-dessus du seuil des outliers, ce qui montre que des pics de consommation se produisent régulièrement. Ces valeurs peuvent être associées à l'utilisation simultanée de plusieurs équipements électroménagers ou à des moments spécifiques de la journée ou de la semaine (par exemple, heures de pointe).
+
+
+# Appliquer le model de regression linéaire
+```{r message=TRUE, warning=TRUE}
+# Charger les librairies nécessaires
+library(dplyr)
+
+# Convertir la colonne DateTime en format date-heure
+data$DateTime <- as.POSIXct(data$DateTime, format = "%Y-%m-%d %H:%M:%S")
+
+# Vérification des valeurs manquantes
+summary(data)
+
+```
+# Description des données
+```{r message=TRUE, warning=TRUE}
+ # Création de colonnes temporelles
+data$DateTime <- as.POSIXct(data$DateTime)
+data$hour <- hour(data$DateTime)
+data$weekday <- weekdays(data$DateTime)
+
+# Saisonnalité journalière
+ggplot(data, aes(x = hour, y = Global_active_power)) +
+  stat_summary(fun = mean, geom = "line", color = "steelblue") +
+  labs(title = "Consommation moyenne selon l'heure")
+
+# Saisonnalité hebdomadaire
+ggplot(data, aes(x = weekday, y = Global_active_power)) +
+  stat_summary(fun = mean, geom = "bar", fill = "skyblue") +
+  labs(title = "Consommation moyenne par jour de la semaine")
+```
+
+# Interprétation
+
+## Analyse de la consommation selon l'heure
+Le graphique ci-dessus illustre l'évolution de la consommation électrique moyenne (en kilowatts) en fonction de l'heure de la journée. On peut en tirer plusieurs observations :
+
+- La consommation est relativement **faible pendant la nuit** (entre 1h et 5h du matin), ce qui est logique car la majorité des foyers sont inactifs à ces heures.
+- On observe un **pic important autour de 7h**, correspondant au réveil des habitants (douches, petit-déjeuner, éclairage, etc.).
+- La consommation diminue ensuite progressivement en journée, atteignant un **niveau bas entre 11h et 17h**, période où les occupants sont souvent absents (travail, école).
+- Un **second pic très marqué apparaît entre 19h et 21h**, probablement lié aux activités du soir (repas, électroménagers, télévision, chauffage/climatisation, etc.).
+- Enfin, la consommation redescend après 22h.
+
+Ces tendances reflètent clairement le **rythme de vie domestique quotidien** et peuvent aider à planifier des stratégies d'économie d'énergie ou de gestion de charge électrique.
+   
+## Analyse de la consommation selon le jour de la semaine
+Ce graphique présente la consommation électrique moyenne (en kilowatts) pour chaque jour de la semaine.
+
+Voici les observations principales :
+
+- **Le dimanche** affiche la **consommation la plus élevée** de la semaine. Cela peut s'expliquer par une présence accrue des occupants à domicile, avec des activités électroménagères plus nombreuses (repas faits maison, lessives, etc.).
+- **Le samedi** suit également avec une consommation relativement élevée, cohérente avec une activité domestique plus soutenue durant le week-end.
+- **Les jours de semaine (du lundi au vendredi)** montrent une consommation **plus modérée**, en particulier le **mardi et le vendredi**, où les niveaux sont les plus bas. Cela peut refléter une absence prolongée des habitants durant la journée (travail, école).
+- **Le mercredi** connaît une légère remontée, possiblement liée à la présence partielle des enfants ou d'activités domestiques intermédiaires.
+
+En résumé, la consommation électrique est plus importante les **week-ends**, ce qui traduit une utilisation plus intense des appareils électriques quand les habitants sont à la maison.  
+
+# Ajuster le modèle de regression linéaire
+Le modèle de régression linéaire a été ajusté pour expliquer la variable cible `Global_active_power` à partir des variables explicatives suivantes : `Voltage`, `Global_reactive_power`, `Sub_metering_1`, `Sub_metering_2` et `Sub_metering_3`.
+
+```{r}
+# Ajuster le modèle de régression linéaire
+modele <- lm(Global_active_power ~ Voltage + Global_reactive_power + Sub_metering_1 + Sub_metering_2 + Sub_metering_3, data = data)
+
+# Afficher le résumé du modèle
+summary(modele)
+
+```
+
+
+# Interprétation
+
+### Analyse des effets des variables sur la consommation active
+
+L’analyse des résultats du modèle de régression linéaire permet de mieux comprendre l’impact de chaque variable sur la consommation électrique active (en kilowatts).
+
+- **Intercept** : Lorsque toutes les autres variables sont nulles, la consommation active prédite est de **7.50 kW**. Toutefois, cette valeur de référence est purement théorique et n’a pas de réelle signification pratique, car un tel scénario (toutes variables nulles) ne se produit pas dans la réalité.
+
+- **Tension (Voltage)** : Chaque augmentation de 1 volt est associée à une **baisse de 0.030 kW** de la consommation active, toutes choses égales par ailleurs. Cela suggère une relation inverse entre la tension et la puissance active consommée.
+
+- **Puissance réactive (Global_reactive_power)** : Une hausse de 1 kW de la puissance réactive entraîne une **augmentation de 1.13 kW** de la puissance active. Cette variable est donc fortement corrélée à la consommation globale.
+
+- **Sous-compteurs d'énergie** :
+  - **Sub_metering_1** et **Sub_metering_2** ont chacun un impact similaire : une unité supplémentaire mesurée par ces sous-compteurs est associée à une **augmentation de 0.063 kW** de la consommation active.
+  - **Sub_metering_3** montre l’effet le plus marqué, avec une contribution de **0.071 kW** par unité enregistrée. Ce sous-compteur semble donc être le plus énergivore parmi les trois.
+
+Tous les coefficients estimés dans ce modèle sont **statistiquement significatifs** (p < 0.001), ce qui signifie que leur effet est très probablement réel et non dû au hasard.
+
+---
+
+### Qualité de l’ajustement du modèle
+
+- Le **coefficient de détermination R²** est de **0.7001**, indiquant que **70 % de la variabilité** de la consommation active est expliquée par les variables incluses dans le modèle. Cela témoigne d’un bon pouvoir explicatif.
+
+- L’**erreur standard des résidus** est de **0.6447**, ce qui reflète un écart modéré entre les valeurs prédites par le modèle et les valeurs réelles observées.
+
+- La **statistique F** du modèle est très élevée (1.217e+05) avec une **p-value < 2.2e-16**, ce qui signifie que le modèle global est hautement significatif : il explique mieux la consommation que le hasard ou un modèle sans variables.
+
+---
+
+### Limites du modèle
+
+Malgré ses bonnes performances, ce modèle présente certaines limites :
+
+- Il est basé sur une **relation linéaire** entre les variables, ce qui peut simplifier à l’excès des dynamiques complexes.
+- Il **n’intègre pas les variations temporelles**, telles que la saisonnalité, les effets d’heure ou de jour de la semaine.
+- Des facteurs potentiellement importants, comme la **température extérieure**, la **présence humaine** ou les **tarifs heures creuses/pleines**, ne sont pas inclus.
+- Enfin, la **distribution des résidus** n’a pas encore été examinée. Cette vérification est essentielle pour s’assurer que les hypothèses de la régression linéaire sont bien respectées.
+
+
+
+# Diagnostique du modèle
+Dans cette section, nous analysons les hypothèses classiques de la régression linéaire à travers trois graphiques : le nuage des résidus, le Q-Q plot et l'histogramme des résidus.
+
+```{r}
+# Résidus vs valeurs ajustées
+plot(modele$fitted.values, resid(modele),
+     xlab = "Valeurs ajustées", ylab = "Résidus",
+     main = "Résidus vs Valeurs ajustées", pch = 16, col = "gray")
+abline(h = 0, col = "red")
+
+# QQ-plot pour vérifier la normalité des résidus
+qqnorm(resid(modele), pch = 16)
+qqline(resid(modele), col = "red")
+
+# Histogramme des résidus
+hist(resid(modele), breaks = 50, main = "Histogramme des résidus", col = "#90be6d")
+
+```
+# Interprétation
+
+# Graphique Résidus VS Valeurs ajustées
+Ce graphique permet d’évaluer l’hypothèse d’homoscédasticité (variance constante des résidus).
+On observe ici une forme de cône inversé : la variance des résidus diminue lorsque les valeurs ajustées augmentent. Cela suggère une hétéroscédasticité, c’est-à-dire que les erreurs du modèle ne sont pas constantes. Cela pourrait affecter la validité des intervalles de confiance et des tests statistiques.
+
+# Graphique normal Q-Q plot
+Le Q-Q plot permet de vérifier si les résidus suivent une distribution normale.
+On constate que les points suivent bien la droite au centre, mais qu’ils s’en écartent aux extrémités. Cela indique que les résidus ne sont pas parfaitement normalement distribués, notamment à cause de la présence de valeurs extrêmes (outliers) dans les deux queues de la distribution. Cela peut influencer la précision des prédictions dans certains cas, mais ne remet pas nécessairement en cause la validité globale du modèle.
+
+# Histogramme des résidus
+Cet histogramme permet d'observer la forme de la distribution des résidus.
+Les résidus sont globalement centrés autour de zéro, ce qui est une bonne chose. Cependant, la distribution présente une asymétrie à droite (la queue est plus longue du côté positif), ce qui confirme l'observation du Q-Q plot. Il y a donc un écart à la normalité, qui pourrait être dû à des observations atypiques (outliers) ou à une variable omise dans le modèle.
+
+
+
+# Vérifier les valeurs de Globa_active_power
+```{r}
+summary(data$Global_active_power)
+```
+
+
+# Evaluer la performance prédictive du modèle
+Après avoir ajusté le modèle de régression linéaire sur les données d'entraînement (80 % des observations), nous avons évalué ses performances sur l’échantillon test (20 %) à l’aide de deux métriques :
+```{r}
+# Diviser en train/test
+set.seed(123)
+index <- sample(1:nrow(data), 0.8 * nrow(data))
+train <- data[index, ]
+test <- data[-index, ]
+
+# Réajustement sur données d'entraînement
+modele_train <- lm(Global_active_power ~ Voltage + Global_reactive_power +
+                     Sub_metering_1 + Sub_metering_2 + Sub_metering_3, data = train)
+
+# Prédictions sur test
+predictions <- predict(modele_train, newdata = test)
+
+# Évaluation
+mae <- mean(abs(test$Global_active_power - predictions))
+rmse <- sqrt(mean((test$Global_active_power - predictions)^2))
+
+cat("MAE :", round(mae, 4), "\n")
+cat("RMSE :", round(rmse, 4), "\n")
+
+```
+# Interprétation
+
+MAE (Mean Absolute Error) : 0.4355
+Cela signifie qu’en moyenne, le modèle se trompe de 0.4355 kilowatts dans ses prédictions de la variable cible Global_active_power.
+
+RMSE (Root Mean Squared Error) : 0.6463
+Cette métrique pénalise davantage les grandes erreurs. Une RMSE de 0.6463 indique que la dispersion des erreurs autour des vraies valeurs est modérée.
+
+
+# Conclusion
+
+e projet a permis de modéliser la consommation électrique résidentielle à l’aide d’un modèle de régression linéaire multiple. Après un travail d’exploration, de visualisation, de modélisation et de validation, plusieurs constats clés peuvent être tirés :
+
+1. Compréhension des données
+La variable cible Global_active_power suit une distribution asymétrique à droite, marquée par des pics de consommation occasionnels.
+
+Les variables explicatives comme Global_reactive_power, Voltage et les différents Sub_metering ont toutes montré une influence significative sur la consommation active.
+
+Les sous-compteurs révèlent un usage énergétique très variable selon les appareils (ex. : le chauffe-eau étant plus sollicité que le micro-ondes).
+
+2. Performance du modèle
+Le modèle atteint un R² de 0.70, ce qui signifie qu’il explique 70 % de la variabilité de la consommation. C’est un bon niveau d’ajustement pour un modèle simple et linéaire.
+
+Les erreurs moyennes de prédiction sont raisonnables :
+
+MAE ≈ 0.4355 kW
+
+RMSE ≈ 0.6463 kW
+Ces résultats montrent que le modèle est prédictivement solide dans le contexte étudié.
+
+3. Analyse des résidus
+Les résidus ne sont pas parfaitement normaux et montrent une légère asymétrie et hétéroscédasticité. Cela ne remet pas en cause la validité du modèle, mais indique que des pistes d’amélioration existent.
+
+4. Limites et pistes d’amélioration
+Le modèle ne prend pas en compte le temps (pas de saisonnalité ni tendance temporelle intégrée).
+
+Des variables explicatives supplémentaires (comme l’heure, la température extérieure, les jours de semaine/weekend) pourraient améliorer la précision des prédictions.
+
+Un modèle de type série temporelle (ARIMA, SARIMA, ou modèle avec composantes saisonnières) pourrait être envisagé pour capturer la dynamique temporelle des données.
+
+En résumé :
+Le modèle linéaire fournit une bonne base de prévision,mais pourrait être renforcé en intégrant la dimension temporelle et d’autres facteurs explicatifs. Il constitue une première étape fiable pour comprendre les déterminants de la consommation électrique dans un foyer.
